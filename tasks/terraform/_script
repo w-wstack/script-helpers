@@ -26,7 +26,7 @@ task_plan() {
 }
 
 
-help__apply=""
+help__apply="Build or change terraform infrastructure"
 task_apply() {
   local tf_env=$1
   local tf_args=${@:2}
