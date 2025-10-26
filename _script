@@ -1,0 +1,309 @@
+#!/bin/bash
+
+set -euo pipefail
+
+# Global variables
+_DOCKER_RESULT_FILE=$(mktemp)
+_DOCKER_OPTS=""
+_DOCKER_IMAGE=""
+_DOCKER_BUILD_ARGS=""
+_TF_ARGS=""
+_TF_PATH=""
+_TF_DEFAULT_AGENT_ROLE_NAME="${_TF_DEFAULT_AGENT_ROLE_NAME:-}"
+AWS_REGION="${AWS_REGION:-ap-southeast-1}"
+ECR_REGISTRY_ID="${ECR_REGISTRY_ID:-}"
+
+# Cleanup on exit
+trap 'rm -f "${_DOCKER_RESULT_FILE}"' EXIT
+
+# Add options to Docker command
+add_docker_opts() {
+  if [[ -z "${_DOCKER_OPTS}" ]]; then
+    _DOCKER_OPTS="${1}"
+  else
+    _DOCKER_OPTS+=" ${1}"
+  fi
+}
+
+# Add arguments to Terraform command
+add_terraform_args() {
+  if [[ -z "${_TF_ARGS}" ]]; then
+    _TF_ARGS="${1}"
+  else
+    _TF_ARGS+=" ${1}"
+  fi
+}
+
+# Ensure Docker volume exists, create if not
+docker_ensure_volume() {
+  local volume_name="${1}"
+
+  if ! docker volume inspect "${volume_name}" >/dev/null 2>&1; then
+    docker volume create "${volume_name}" >/dev/null 2>&1
+  fi
+}
+
+# Check if running inside CI environment
+runs_inside_ci() {
+  [[ -n "${CI:-}" ]]
+}
+
+
+# Check if a function exists
+is_func() {
+  declare -f "${1}" >/dev/null 2>&1
+}
+
+# Die with error message
+die() {
+  echo "ERROR: ${1}" >&2
+  exit 1
+}
+
+
+# Assume an AWS role
+assume_role() {
+  local account_id="${1}"
+  local role="${2}"
+
+  local credentials
+  credentials=$(aws sts assume-role \
+    --role-arn "arn:aws:iam::${account_id}:role/${role}" \
+    --role-session-name initial \
+    --duration-seconds 2700 | jq '.Credentials')
+
+  export AWS_ACCESS_KEY_ID=$(echo "${credentials}" | jq -r .AccessKeyId)
+  export AWS_SECRET_ACCESS_KEY=$(echo "${credentials}" | jq -r .SecretAccessKey)
+  export AWS_SESSION_TOKEN=$(echo "${credentials}" | jq -r .SessionToken)
+  unset AWS_SECURITY_TOKEN
+}
+
+
+# Add a tag to an existing container image
+_add_container_tag() {
+  local repository_id="${1}"
+  local repository_name="${2}"
+  local image_tag="${3}"
+  local new_image_tag="${4}"
+
+  (
+    assume_role "$(_account_id_for_name "tools")" "push-containers"
+
+    local image_manifest
+    image_manifest=$(aws ecr batch-get-image \
+      --region "${AWS_REGION}" \
+      --registry-id "${repository_id}" \
+      --repository-name "${repository_name}" \
+      --image-ids imageTag="${image_tag}" \
+      --query 'images[].imageManifest' \
+      --output text)
+
+    aws ecr put-image \
+      --region "${AWS_REGION}" \
+      --registry-id "${repository_id}" \
+      --repository-name "${repository_name}" \
+      --image-tag "${new_image_tag}" \
+      --image-manifest "${image_manifest}" || true
+  )
+}
+
+# Add environment-specific tags to container
+add_container_tag() {
+  local env="${1}"
+  local repo_id="${2}"
+  local repo_group="${3}"
+  local container_name="${4}"
+
+  if runs_inside_ci; then
+    local env_tag_for_container="${env}-$(date +%s)"
+    _add_container_tag "${repo_id}" "${repo_group}/${container_name}" \
+      "$(get_tagImage "${container_name}")" "${env_tag_for_container}"
+
+    env_tag_for_container="${env}-last"
+    _add_container_tag "${repo_id}" "${repo_group}/${container_name}" \
+      "$(get_tagImage "${container_name}")" "${env_tag_for_container}"
+  fi
+}
+
+# Get container image URL from info file
+get_urlImage() {
+  local app_name="${1}"
+  local container_url
+  container_url="$(echo "${app_name}" | tr "[:lower:]" "[:upper:]" | tr - _)_CONTAINER"
+
+  # shellcheck disable=SC1090
+  source "${app_name}-container.info"
+
+  # Use indirect variable expansion
+  local url="${!container_url}"
+  echo "${url%%:*}"
+}
+
+# Get container image tag from info file
+get_tagImage() {
+  local app_name="${1}"
+  local container_url
+  container_url="$(echo "${app_name}" | tr "[:lower:]" "[:upper:]" | tr - _)_CONTAINER"
+  local container_tag_info="${container_url}_TAG"
+
+  # shellcheck disable=SC1090
+  source "${app_name}-container.info"
+
+  # Use indirect variable expansion
+  local tag="${!container_tag_info}"
+  echo "${tag%%:*}"
+}
+
+# Run Docker container with appropriate configuration
+docker_run() {
+  # Build toolchain container if not already built
+  if [[ -z "${_DOCKER_IMAGE}" ]]; then
+    echo -n "Building toolchain container; this might take a while..."
+    _DOCKER_IMAGE=$(docker build ${_DOCKER_BUILD_ARGS} . -q)
+    echo " Done."
+  fi
+
+  # Configure Docker options based on environment
+  if runs_inside_ci; then
+    add_docker_opts "-v pipelines:/godata/pipelines"
+    add_docker_opts "-v /var/run/secrets/eks.amazonaws.com/serviceaccount/:/var/run/secrets/eks.amazonaws.com/serviceaccount/"
+    add_docker_opts "-v godata:/godata"
+    add_docker_opts "-v $(pwd):$(pwd)"
+    add_docker_opts "-w $(pwd)"
+  else
+    add_docker_opts "-it -v $(pwd):/workspace:cached -w /workspace"
+    add_docker_opts "-v ${HOME}/.aws:/root/.aws"
+  fi
+
+  add_docker_opts "-v /var/run/docker.sock:/var/run/docker.sock"
+
+  # Run Docker container with environment variables
+  docker run --rm \
+    --hostname "$(hostname)" \
+    --env-file <(env | grep -E '^PACT_' || true) \
+    --env-file <(env | grep -E '^AWS_' || true) \
+    --env-file <(env | grep -E '^SONAR_' || true) \
+    --env-file <(env | grep -E '^NVD_' || true) \
+    --env-file <(env | grep -E '^TWISTLOCK_' || true) \
+    --env-file <(env | grep -E '^TF_' || true) \
+    --env-file <(env | grep -E '^GO_' || true) \
+    --env-file <(env | grep -E '^NODE_' || true) \
+    --env-file <(env | grep -E '^NUXT_' || true) \
+    ${_DOCKER_OPTS} "${_DOCKER_IMAGE}" "$@"
+
+  local dkr_exit_code=$?
+  echo "${dkr_exit_code}" > "${_DOCKER_RESULT_FILE}"
+
+  return "${dkr_exit_code}"
+}
+
+# Run Terraform command in Docker
+tf() {
+  _DOCKER_IMAGE="${TERRAFORM_DOCKER_IMAGE}"
+  
+
+  if runs_inside_ci; then
+    add_docker_opts "-u $(id -u)"
+    docker_run "$@" $_TF_ARGS
+  else
+    docker_run "$@" $_TF_ARGS
+  fi
+}
+
+# Run Terraform with optional path change
+terraform() {
+  local exit_code
+
+  if [[ -n "${_TF_PATH:-}" ]]; then
+    pushd "${_TF_PATH}" > /dev/null
+  fi
+
+  tf "$@"
+  exit_code=$?
+
+  if [[ -n "${_TF_PATH:-}" ]]; then
+    popd > /dev/null
+  fi
+
+  return "${exit_code}"
+}
+
+# Run Gradle in Docker container
+gradle() {
+  docker_ensure_volume gradle-cache
+  _DOCKER_IMAGE="${GRADLE_DOCKER_IMAGE}"
+  add_docker_opts "-v gradle-cache:/home/gradle/.gradle"
+  docker_run gradle "$@"
+}
+
+# Run Node.js in Docker container
+node() {
+  docker_ensure_volume pnpm-cache
+  _DOCKER_IMAGE="${NODE_DOCKER_IMAGE}"
+  add_docker_opts "-v pnpm-cache:/pnpm"
+  docker_run "$@"
+}
+
+# Push container to ECR
+push_container() {
+  local repo_url="${1}"
+  local app_name="${2}"
+
+  # Determine AWS CLI version and login accordingly
+  local aws_cli_version
+  aws_cli_version=$(aws --version 2>&1 | cut -d " " -f1 | cut -d "/" -f2)
+  local aws_cli_version_2="2.0.0"
+
+  if printf '%s\n' "${aws_cli_version_2}" "${aws_cli_version}" | sort -V -C; then
+    aws ecr get-login-password --region "${AWS_REGION}" | \
+      docker login --username AWS --password-stdin "${ECR_REGISTRY_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com"
+  else
+    eval "$(aws ecr get-login --no-include-email --region ${AWS_REGION})"
+  fi
+
+  local revision_tag
+  revision_tag=$(git rev-parse --short HEAD)
+
+  # Tag and push container
+  for tag in "latest" "${revision_tag}"; do
+    docker tag "${app_name}:latest" "${repo_url}:${tag}"
+    docker push "${repo_url}:${tag}"
+  done
+
+  # Write container info to file
+  local var_name
+  var_name="$(echo "${app_name}" | tr "[:lower:]" "[:upper:]" | tr - _)_CONTAINER"
+
+  cat > "${app_name}-container.info" <<EOF
+${var_name}_TAG=${revision_tag}
+${var_name}=${repo_url}:${revision_tag}
+EOF
+}
+
+# Run kubectl commands in Docker with EKS authentication
+kubectl_run() {
+  local account_id="${1}"
+  local role="${2}"
+  local cluster_name="${3}"
+  shift 3
+
+  assume_role "${account_id}" "${role}"
+  aws eks --region "${AWS_REGION}" update-kubeconfig --name "${cluster_name}" > /dev/null 2>&1
+
+  local script_dir
+  script_dir="$(dirname "${BASH_SOURCE[0]}")"
+  _DOCKER_IMAGE="$(docker build -f "${script_dir}/toolchain-containers/Dockerfile.kubernetes" . -q)"
+
+  add_docker_opts "-v ${HOME}/.kube:/root/.kube"
+  docker_run "$@"
+}
+
+# Run kubectl commands in Docker using existing kubeconfig
+_kubectl() {
+  local script_dir
+  script_dir="$(dirname "${BASH_SOURCE[0]}")"
+  _DOCKER_IMAGE="$(docker build -f "${script_dir}/toolchain-containers/Dockerfile.kubernetes" . -q)"
+
+  add_docker_opts "-v ${HOME}/.kube:/root/.kube"
+  docker_run "$@"
+}
