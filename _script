@@ -1,6 +1,6 @@
 #!/bin/bash
 
-set -euo pipefail
+#set -euo pipefail
 
 # Global variables
 _DOCKER_RESULT_FILE=$(mktemp)

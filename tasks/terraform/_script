@@ -1,0 +1,99 @@
+#!/bin/bash
+
+help__init="Initialize terraform working directory"
+task_init(){
+  terraform_init $@
+}
+
+
+help__plan="Generate and show terraform execution plan"
+task_plan() {
+  local tf_env=$1
+  local tf_args=${@:2}
+
+  terraform_init $tf_args || terraform_init
+  terraform workspace select $tf_env || terraform workspace new $tf_env
+
+  if is_func "_plan"; then
+    log "use _plan fun"
+
+    _plan $tf_args
+  elif [ $tf_env = "def" ]; then
+    terraform plan $tf_args
+  else
+    terraform plan -var-file $(get_tfvar_path $tf_env) $tf_args
+  fi
+}
+
+
+help__apply="Build or change terraform infrastructure"
+task_apply() {
+  local tf_env=$1
+  local tf_args=${@:2}
+
+  terraform_init $tf_args || terraform_init
+  terraform workspace select $tf_env || terraform workspace new $tf_env
+
+  if is_func "_apply"; then
+    log "use _apply fun"
+
+    _apply $tf_args
+  elif [ $tf_env = "def" ]; then
+    terraform apply $tf_args
+  else
+    terraform apply -var-file $(get_tfvar_path $tf_env) $tf_args
+  fi
+}
+
+
+help__state="List terraform state resources"
+task_state() {
+  local tf_env=$1
+  local tf_args=${@:2}
+
+  terraform_init || return 1
+  terraform workspace select $tf_env || terraform workspace new $tf_env
+
+  terraform state list $tf_args
+}
+
+
+help__import="Import existing resource into terraform state"
+task_import() {
+  local tf_env=$1
+  local resource_address=$2
+  local resource_id=$3
+  local tf_args=${@:4}
+
+  if [ -z "$resource_address" ] || [ -z "$resource_id" ]; then
+    log "Usage: import <env> <resource_address> <resource_id> [additional_args]"
+    return 1
+  fi
+
+  terraform_init || return 1
+  terraform workspace select $tf_env || terraform workspace new $tf_env
+
+  if [ $tf_env = "def" ]; then
+    terraform import $tf_args $resource_address $resource_id
+  else
+    terraform import -var-file $(get_tfvar_path $tf_env) $tf_args $resource_address $resource_id
+  fi
+}
+
+
+help__unlock="Manually unlock terraform state"
+task_unlock() {
+  local tf_env=$1
+  local lock_id=$2
+  local tf_args=${@:3}
+
+  if [ -z "$lock_id" ]; then
+    log "Usage: unlock <env> <lock_id> [additional_args]"
+    return 1
+  fi
+
+  terraform_init || return 1
+  terraform workspace select $tf_env || terraform workspace new $tf_env
+
+  terraform force-unlock $tf_args $lock_id
+}
