@@ -41,7 +41,7 @@ task_apply() {
   elif [ $tf_env = "def" ]; then
     terraform apply $tf_args
   else
-    terraform apply -var-file $(get_tfvar_path $tf_env) $tf_args
+    terraform apply -var-file="$(get_tfvar_path $tf_env)" $tf_args
   fi
 }
 

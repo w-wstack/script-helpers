@@ -55,6 +55,10 @@ die() {
   exit 1
 }
 
+log() {
+  echo "[$(date "+%Y-%m-%d %H:%M:%S")] - ${1}"
+}
+
 
 # Assume an AWS role
 assume_role() {
