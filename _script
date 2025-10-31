@@ -230,6 +230,10 @@ terraform() {
 get_tfvar_path(){
   local env="${1}"
 
+  if [[ -n "${_TF_PATH:-}" ]]; then
+    pushd "${_TF_PATH}" > /dev/null
+  fi
+
   if [[ -z "${env}" ]]; then
     die "Environment must be specified for get_tfvar_path"
   fi
@@ -243,6 +247,10 @@ get_tfvar_path(){
 
   if [[ ! -f "${tfvar_file}" ]]; then
     die "tfvars file not found: ${tfvar_file}"
+  fi
+
+  if [[ -n "${_TF_PATH:-}" ]]; then
+    popd > /dev/null
   fi
 
   echo "${tfvar_file}"
