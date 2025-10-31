@@ -21,7 +21,7 @@ task_plan() {
   elif [ $tf_env = "def" ]; then
     terraform plan $tf_args
   else
-    terraform plan -var-file $(get_tfvar_path $tf_env) $tf_args
+    terraform plan -var-file="$(get_tfvar_path $tf_env)" $tf_args
   fi
 }
 
@@ -42,6 +42,26 @@ task_apply() {
     terraform apply $tf_args
   else
     terraform apply -var-file="$(get_tfvar_path $tf_env)" $tf_args
+  fi
+}
+
+
+help__destroy="Destroy terraform-managed infrastructure"
+task_destroy() {
+  local tf_env=$1
+  local tf_args=${@:2}
+
+  terraform_init $tf_args || terraform_init
+  terraform workspace select $tf_env || terraform workspace new $tf_env
+
+  if is_func "_destroy"; then
+    log "use _destroy fun"
+
+    _destroy $tf_args
+  elif [ $tf_env = "def" ]; then
+    terraform destroy $tf_args
+  else
+    terraform destroy -var-file="$(get_tfvar_path $tf_env)" $tf_args
   fi
 }
 
