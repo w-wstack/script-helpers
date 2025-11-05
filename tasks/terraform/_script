@@ -74,7 +74,7 @@ task_state() {
   terraform_init || return 1
   terraform workspace select $tf_env || terraform workspace new $tf_env
 
-  terraform state list $tf_args
+  terraform state $tf_args
 }
 
 
