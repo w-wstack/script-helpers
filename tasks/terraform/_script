@@ -35,7 +35,7 @@ task_apply() {
   terraform workspace select $tf_env || terraform workspace new $tf_env
 
   if runs_inside_ci; then
-    add_terrafrom_args "-auto-approve"
+    add_terraform_args "-auto-approve"
   fi
   if is_func "_apply"; then
     log "use _apply fun"

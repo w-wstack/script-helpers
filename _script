@@ -196,6 +196,9 @@ docker_run() {
   return "${dkr_exit_code}"
 }
 
+add_terraform_args(){
+  [ -z "${_TF_ARGS}" ] && _TF_ARGS="${1}" || _TF_ARGS+=" ${1}"
+}
 # Run Terraform command in Docker
 tf() {
   _DOCKER_IMAGE="${TERRAFORM_DOCKER_IMAGE}"
@@ -264,6 +267,8 @@ terraform_init(){
     terraform init $@
   fi
 }
+
+
 
 # Run Gradle in Docker container
 gradle() {
