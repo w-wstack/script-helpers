@@ -1,0 +1,12 @@
+#!/bin/bash
+
+help__docker="Manually unlock terraform state"
+task_docker() {
+  _docker
+}
+
+help__docker_push="Manually unlock terraform state"
+task_docker_push() {
+  assume_role "$(_account_id_for_name "tools")" "push-containers"
+  _docker_push
+}
