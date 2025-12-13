@@ -1,0 +1,12 @@
+FROM public.ecr.aws/lambda/provided:al2023
+
+# Copy bootstrap script if exists, otherwise create default
+COPY script-helpers/shell/native/bootstrap ${LAMBDA_TASK_ROOT}/bootstrap
+
+COPY platform-lambda/build/native/nativeCompile/platform-lambda ${LAMBDA_TASK_ROOT}/springboot-lambda-function
+COPY platform-lambda/build/native/nativeCompile/*.so ${LAMBDA_TASK_ROOT}/
+
+RUN chmod +x ${LAMBDA_TASK_ROOT}/springboot-lambda-function
+
+
+ENTRYPOINT ["/var/task/bootstrap"]
