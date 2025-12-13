@@ -8,5 +8,4 @@ COPY platform-lambda/build/native/nativeCompile/*.so ${LAMBDA_TASK_ROOT}/
 
 RUN chmod +x ${LAMBDA_TASK_ROOT}/springboot-lambda-function
 
-
 ENTRYPOINT ["/var/task/bootstrap"]
