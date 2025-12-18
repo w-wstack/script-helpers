@@ -1,5 +1,5 @@
 #!/bin/sh
 
 cd ${LAMBDA_TASK_ROOT:-.}
-
+chmod +x ./platform-lambda
 ./platform-lambda -Dlogging.level.org.springframework=DEBUG
