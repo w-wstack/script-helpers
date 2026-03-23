@@ -104,6 +104,20 @@ task_import() {
 }
 
 
+help__output="Save terraform outputs to a JSON file"
+task_output() {
+  local tf_env=$1
+  local output_file=${2:-"${_TF_PATH}/output-${tf_env}.json"}
+
+  terraform_init || return 1
+  terraform workspace select $tf_env || terraform workspace new $tf_env
+
+  log "Saving Terraform outputs to $output_file..."
+  terraform output -json > "$output_file"
+  log "Outputs saved to: $output_file"
+}
+
+
 help__unlock="Manually unlock terraform state"
 task_unlock() {
   local tf_env=$1
