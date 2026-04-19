@@ -1,0 +1,27 @@
+FROM amazonlinux:2023
+
+# Build toolchain for Rust Lambda. Base image is Amazon Linux 2023 so the
+# produced binary's glibc symbol requirements match the Lambda provided.al2023
+# runtime exactly (glibc 2.34). Any newer Debian/Ubuntu rust image risks
+# emitting a binary that needs a glibc AL2023 doesn't have.
+RUN dnf install -y -q \
+      gcc gcc-c++ pkg-config openssl-devel cmake curl tar gzip which \
+      ca-certificates \
+    && dnf clean all
+
+# Install rustup + stable toolchain + aarch64-linux-gnu target. CARGO_HOME
+# and RUSTUP_HOME live under /usr/local so they are not wiped when /root
+# volumes are mounted; the cargo registry + git caches are still mountable
+# separately for cross-build reuse.
+ENV RUSTUP_HOME=/usr/local/rustup \
+    CARGO_HOME=/usr/local/cargo \
+    PATH=/usr/local/cargo/bin:$PATH
+
+RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs \
+      | sh -s -- -y --default-toolchain stable --profile minimal \
+    && rustup target add aarch64-unknown-linux-gnu \
+    && cargo --version && rustc --version
+
+WORKDIR /workspace
+
+CMD ["cargo", "build", "--release", "--target", "aarch64-unknown-linux-gnu", "--bin", "bootstrap"]
