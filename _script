@@ -170,7 +170,9 @@ docker_run() {
     add_docker_opts "-v $(pwd):$(pwd)"
     add_docker_opts "-w $(pwd)"
   else
-    add_docker_opts "-it -v $(pwd):/workspace:cached -w /workspace"
+    # -i (keep STDIN open), not -it — -t fails when stdout is not a TTY
+    # (piped, backgrounded, nested shells, etc). Interactive tools can re-add -t.
+    add_docker_opts "-i -v $(pwd):/workspace:cached -w /workspace"
     add_docker_opts "-v ${HOME}/.aws:/root/.aws"
   fi
 

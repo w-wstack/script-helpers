@@ -4,9 +4,10 @@ FROM amazonlinux:2023
 # produced binary's glibc symbol requirements match the Lambda provided.al2023
 # runtime exactly (glibc 2.34). Any newer Debian/Ubuntu rust image risks
 # emitting a binary that needs a glibc AL2023 doesn't have.
+# NOTE: AL2023 ships curl-minimal + ca-certificates by default. Installing
+# the "curl" package conflicts with curl-minimal, so leave it out.
 RUN dnf install -y -q \
-      gcc gcc-c++ pkg-config openssl-devel cmake curl tar gzip which \
-      ca-certificates \
+      gcc gcc-c++ pkg-config openssl-devel cmake tar gzip which \
     && dnf clean all
 
 # Install rustup + stable toolchain + aarch64-linux-gnu target. CARGO_HOME
